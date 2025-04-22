@@ -171,52 +171,82 @@ class WPPPC_PayPal_Gateway extends WC_Payment_Gateway {
     /**
      * AJAX handler for creating a WooCommerce order
      */
-    public function ajax_create_order() {
+    
+/**
+ * Add enhanced logging to the PayPal proxy gateway
+ */
+
+// Add this method to the WPPPC_PayPal_Gateway class
+public function ajax_create_order() {
     // Log the raw POST data for debugging
     error_log('PayPal Proxy - Create Order Raw POST data: ' . print_r($_POST, true));
     
     try {
         check_ajax_referer('wpppc-nonce', 'nonce');
         
-        // Validate checkout fields (skip for testing)
-        $validation = array('valid' => true); 
+        // Log the checkout fields
+        $checkout_fields = WC()->checkout()->get_checkout_fields();
+        error_log('PayPal Proxy - Checkout fields structure: ' . print_r($checkout_fields, true));
         
         // Create order with error handling
         try {
-            $checkout = WC()->checkout();
-            $order_id = $checkout->create_order($_POST);
+            // For testing, create a simple order directly
+            $order = wc_create_order();
             
-            if (!$order_id) {
-                error_log('PayPal Proxy - Failed to create order - no order ID returned');
-                wp_send_json_error(array(
-                    'message' => 'Failed to create order - no order ID returned'
-                ));
-                wp_die();
+            // Add billing information
+            $billing_address = array(
+                'first_name' => !empty($_POST['billing_first_name']) ? sanitize_text_field($_POST['billing_first_name']) : 'Test',
+                'last_name'  => !empty($_POST['billing_last_name']) ? sanitize_text_field($_POST['billing_last_name']) : 'User',
+                'email'      => !empty($_POST['billing_email']) ? sanitize_email($_POST['billing_email']) : 'test@example.com',
+            );
+            
+            $order->set_address($billing_address, 'billing');
+            $order->set_address($billing_address, 'shipping');
+            
+            // Add a product if cart is empty (for testing)
+            if (WC()->cart->is_empty()) {
+                // Get any product
+                $products = wc_get_products(array('limit' => 1));
+                if (!empty($products)) {
+                    $product = $products[0];
+                    $order->add_product($product, 1);
+                }
+            } else {
+                // Add real cart items
+                foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
+                    $product = $cart_item['data'];
+                    $order->add_product($product, $cart_item['quantity']);
+                }
             }
             
-            $order = wc_get_order($order_id);
+            // Calculate totals
+            $order->calculate_totals();
+            
+            // Set payment method
+            $order->set_payment_method('paypal_proxy');
+            
+            // Set status
             $order->update_status('pending', __('Awaiting PayPal payment', 'woo-paypal-proxy-client'));
             
-            // For testing, use mock data instead of actual API call
-            $response = array(
-                'success' => true,
-                'message' => 'Mock response for testing'
-            );
+            $order_id = $order->get_id();
+            error_log('PayPal Proxy - Successfully created order #' . $order_id);
             
             // Return success
             wp_send_json_success(array(
                 'order_id'   => $order_id,
                 'order_key'  => $order->get_order_key(),
-                'proxy_data' => $response,
+                'proxy_data' => array('message' => 'Order created successfully'),
             ));
         } catch (Exception $e) {
             error_log('PayPal Proxy - Exception during order creation: ' . $e->getMessage());
+            error_log('PayPal Proxy - Exception trace: ' . $e->getTraceAsString());
             wp_send_json_error(array(
                 'message' => 'Order creation error: ' . $e->getMessage()
             ));
         }
     } catch (Exception $e) {
         error_log('PayPal Proxy - Exception in AJAX handler: ' . $e->getMessage());
+        error_log('PayPal Proxy - Exception trace: ' . $e->getTraceAsString());
         wp_send_json_error(array(
             'message' => 'AJAX handler error: ' . $e->getMessage()
         ));

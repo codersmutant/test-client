@@ -189,12 +189,12 @@
         // Get form data
         const formData = $('form.checkout').serialize();
         
-        // Send AJAX request
+        // Send AJAX request - FIX: Changed action name to match PHP handler
         $.ajax({
             type: 'POST',
             url: wpppc_params.ajax_url,
             data: {
-                action: 'wpppc_ajax_create_order',
+                action: 'wpppc_create_order', // Changed from wpppc_ajax_create_order to match PHP
                 nonce: wpppc_params.nonce,
                 ...parseFormData(formData)
             },
@@ -307,13 +307,17 @@
     
     console.log('Sending message to iframe:', message);
     
-    // Get iframe origin - use wildcard for testing
-    // const iframeUrl = new URL(iframe.src);
-    // const targetOrigin = iframeUrl.origin;
-    const targetOrigin = '*'; // Use wildcard for testing
+    // For development/testing, use wildcard origin
+    // In production, you should use the actual iframe origin
+    const targetOrigin = '*';
     
-    // Send message
-    iframe.contentWindow.postMessage(message, targetOrigin);
+    try {
+        // Send message
+        iframe.contentWindow.postMessage(message, targetOrigin);
+        console.log('Message sent successfully to iframe');
+    } catch (error) {
+        console.error('Error sending message to iframe:', error);
+    }
 }
     
     /**
