@@ -1,6 +1,14 @@
 /**
  * WooCommerce PayPal Proxy Client Checkout Styles
  */
+ 
+ /* Allow iframe to resize smoothly */
+#paypal-proxy-iframe {
+    height:1500px !important;
+    max-width: 100%;
+    min-width: 100px;
+    transition: height 0.3s ease;
+}
 
 /* PayPal Buttons Container */
 .wpppc-paypal-buttons-container {
@@ -11,7 +19,7 @@
 /* PayPal Iframe Wrapper */
 .wpppc-iframe-wrapper {
     width: 100%;
-    min-height: 150px;
+    min-height: 1500px !important;
     transition: opacity 0.3s ease;
 }
 

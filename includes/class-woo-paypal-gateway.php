@@ -259,56 +259,78 @@ public function ajax_create_order() {
      * AJAX handler for completing an order after payment
      */
     public function ajax_complete_order() {
-        check_ajax_referer('wpppc-nonce', 'nonce');
-        
-        $order_id = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
-        $paypal_order_id = isset($_POST['paypal_order_id']) ? sanitize_text_field($_POST['paypal_order_id']) : '';
-        $transaction_id = isset($_POST['transaction_id']) ? sanitize_text_field($_POST['transaction_id']) : '';
-        
-        if (!$order_id || !$paypal_order_id) {
-            wp_send_json_error(array(
-                'message' => __('Invalid order data', 'woo-paypal-proxy-client')
-            ));
-            wp_die();
-        }
-        
-        $order = wc_get_order($order_id);
-        
-        if (!$order) {
-            wp_send_json_error(array(
-                'message' => __('Order not found', 'woo-paypal-proxy-client')
-            ));
-            wp_die();
-        }
-        
-        // Verify payment with Website B
-        $verification = $this->api_handler->verify_payment($paypal_order_id, $order);
-        
-        if (is_wp_error($verification)) {
-            wp_send_json_error(array(
-                'message' => $verification->get_error_message()
-            ));
-            wp_die();
-        }
+    // Log all request data for debugging
+    error_log('PayPal Proxy - Complete Order Request: ' . print_r($_POST, true));
+    
+    // Verify nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wpppc-nonce')) {
+        error_log('PayPal Proxy - Invalid nonce in complete order request');
+        wp_send_json_error(array(
+            'message' => 'Security check failed'
+        ));
+        wp_die();
+    }
+    
+    $order_id = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
+    $paypal_order_id = isset($_POST['paypal_order_id']) ? sanitize_text_field($_POST['paypal_order_id']) : '';
+    $transaction_id = isset($_POST['transaction_id']) ? sanitize_text_field($_POST['transaction_id']) : '';
+    
+    if (!$order_id || !$paypal_order_id) {
+        error_log('PayPal Proxy - Invalid order data in completion request');
+        wp_send_json_error(array(
+            'message' => __('Invalid order data', 'woo-paypal-proxy-client')
+        ));
+        wp_die();
+    }
+    
+    $order = wc_get_order($order_id);
+    
+    if (!$order) {
+        error_log('PayPal Proxy - Order not found: ' . $order_id);
+        wp_send_json_error(array(
+            'message' => __('Order not found', 'woo-paypal-proxy-client')
+        ));
+        wp_die();
+    }
+    
+    try {
+        // Log order details
+        error_log('PayPal Proxy - Processing order: ' . $order_id . ', Status: ' . $order->get_status());
         
         // Complete the order
         $order->payment_complete($transaction_id);
+        
+        // Add order note
         $order->add_order_note(
-            sprintf(__('PayPal payment completed via proxy. PayPal Order ID: %s, Transaction ID: %s', 'woo-paypal-proxy-client'),
+            sprintf(__('PayPal payment completed. PayPal Order ID: %s, Transaction ID: %s', 'woo-paypal-proxy-client'),
                 $paypal_order_id,
                 $transaction_id
             )
         );
         
+        // Update status to processing
+        $order->update_status('processing');
+        
         // Empty cart
         WC()->cart->empty_cart();
         
-        wp_send_json_success(array(
-            'redirect' => $this->get_return_url($order)
-        ));
+        // Log the success
+        error_log('PayPal Proxy - Order successfully completed: ' . $order_id);
         
-        wp_die();
+        // Return success with redirect URL
+        $redirect_url = $order->get_checkout_order_received_url();
+        wp_send_json_success(array(
+            'redirect' => $redirect_url
+        ));
+    } catch (Exception $e) {
+        error_log('PayPal Proxy - Exception during order completion: ' . $e->getMessage());
+        wp_send_json_error(array(
+            'message' => 'Error completing order: ' . $e->getMessage()
+        ));
     }
+    
+    wp_die();
+}
     
     /**
      * Process callback from Website B

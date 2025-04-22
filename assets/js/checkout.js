@@ -79,6 +79,13 @@
                 case 'payment_error':
                     handlePaymentError(data.error);
                     break;
+                    
+                 case 'resize_iframe':
+                // Handle iframe resizing
+                if (data.height) {
+                    $('#paypal-proxy-iframe').css('height', data.height + 'px');
+                }
+                break;
             }
         });
     }
@@ -218,56 +225,102 @@
      * Complete payment after PayPal approval
      */
     function completePayment(paymentData) {
-        return new Promise(function(resolve, reject) {
-            $.ajax({
-                type: 'POST',
-                url: wpppc_params.ajax_url,
-                data: {
-                    action: 'wpppc_complete_order',
-                    nonce: wpppc_params.nonce,
-                    order_id: orderID,
-                    paypal_order_id: paymentData.orderID,
-                    transaction_id: paymentData.transactionID || ''
-                },
-                success: function(response) {
-                    if (response.success) {
-                        resolve(response.data);
-                    } else {
-                        reject({ message: response.data.message });
-                    }
-                },
-                error: function(xhr, status, error) {
-                    reject({ message: 'Payment completion request failed', xhr: xhr });
+    console.log('Making completePayment AJAX request with data:', {
+        order_id: orderID,
+        paypal_order_id: paymentData.orderID,
+        transaction_id: paymentData.transactionID || ''
+    });
+
+    return new Promise(function(resolve, reject) {
+        $.ajax({
+            type: 'POST',
+            url: wpppc_params.ajax_url,
+            data: {
+                action: 'wpppc_complete_order',
+                nonce: wpppc_params.nonce,
+                order_id: orderID,
+                paypal_order_id: paymentData.orderID,
+                transaction_id: paymentData.transactionID || ''
+            },
+            success: function(response) {
+                console.log('Complete payment response:', response);
+                if (response.success) {
+                    resolve(response.data);
+                } else {
+                    reject({ message: response.data.message });
                 }
-            });
+            },
+            error: function(xhr, status, error) {
+                console.error('Complete payment AJAX error:', xhr.responseText);
+                reject({ message: 'Payment completion request failed: ' + error, xhr: xhr });
+            }
         });
-    }
+    });
+}
     
     /**
      * Handle order approved by PayPal
      */
     function handleOrderApproved(payload) {
-        if (!orderCreated || !orderID) {
-            console.error('No order created or invalid order ID');
-            return;
-        }
-        
-        // Store PayPal data
-        paypalData = payload;
-        
-        // Complete the payment
-        completePayment(payload).then(function(data) {
-            // Redirect to thank you page
-            window.location.href = data.redirect;
-        }).catch(function(error) {
-            console.error('Payment completion failed:', error);
-            displayError('general', error.message || 'Failed to complete payment. Please try again.');
+    console.log('Order approved with payload:', payload);
+    
+    if (!orderCreated || !orderID) {
+        console.error('No order created or invalid order ID');
+        return;
+    }
+    
+    // Store PayPal data
+    paypalData = payload;
+    
+    // Show a loading message to the user
+    showLoading('Finalizing your payment...');
+    
+    // Complete the payment directly from Website A (not from the iframe)
+    $.ajax({
+        type: 'POST',
+        url: wpppc_params.ajax_url,
+        data: {
+            action: 'wpppc_complete_order',
+            nonce: wpppc_params.nonce,
+            order_id: orderID,
+            paypal_order_id: payload.orderID,
+            transaction_id: payload.transactionID || ''
+        },
+        success: function(response) {
+            console.log('Payment completion response:', response);
+            hideLoading();
+            
+            if (response.success && response.data && response.data.redirect) {
+                // Redirect to thank you page
+                window.location.href = response.data.redirect;
+            } else {
+                displayError('general', (response.data && response.data.message) || 'Failed to complete payment. Please contact customer support.');
+                
+                // Reset order flags
+                orderCreated = false;
+                orderID = null;
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('Payment completion error:', xhr.responseText);
+            hideLoading();
+            displayError('general', 'Failed to complete payment. Please contact customer support with this transaction ID: ' + payload.transactionID);
             
             // Reset order flags
             orderCreated = false;
             orderID = null;
-        });
-    }
+        }
+    });
+}
+
+function showLoading(message) {
+    $('#wpppc-paypal-loading').show();
+    $('.wpppc-loading-text').text(message || 'Processing payment...');
+}
+
+function hideLoading() {
+    $('#wpppc-paypal-loading').hide();
+}
     
     /**
      * Handle payment cancelled
