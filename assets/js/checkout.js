@@ -38,6 +38,20 @@
             creatingOrder = false;
             orderCreated = false;
         });
+        
+        // Hide the standard "Place Order" button when PayPal is selected
+        $('form.checkout').on('change', 'input[name="payment_method"]', function() {
+            if ($(this).val() === 'paypal_proxy') {
+                $('#place_order').hide();
+            } else {
+                $('#place_order').show();
+            }
+        });
+        
+        // Also check on page load
+        if ($('input[name="payment_method"]:checked').val() === 'paypal_proxy') {
+            $('#place_order').hide();
+        }
     }
     
     /**

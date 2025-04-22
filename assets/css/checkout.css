@@ -4,7 +4,7 @@
  
  /* Allow iframe to resize smoothly */
 #paypal-proxy-iframe {
-    height:1500px !important;
+    height:150px !important;
     max-width: 100%;
     min-width: 100px;
     transition: height 0.3s ease;
@@ -19,7 +19,7 @@
 /* PayPal Iframe Wrapper */
 .wpppc-iframe-wrapper {
     width: 100%;
-    min-height: 1500px !important;
+    min-height: 150px !important;
     transition: opacity 0.3s ease;
 }
 
