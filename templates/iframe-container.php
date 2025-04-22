@@ -16,6 +16,8 @@ if (!defined('ABSPATH')) {
             frameborder="0" 
             allowtransparency="true"
             scrolling="no"
+            sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+            referrerpolicy="no-referrer"
             style="width: 100%; min-height: 150px; border: none; overflow: hidden;"
         ></iframe>
     </div>

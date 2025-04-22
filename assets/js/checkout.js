@@ -52,6 +52,14 @@
         if ($('input[name="payment_method"]:checked').val() === 'paypal_proxy') {
             $('#place_order').hide();
         }
+        
+        // Listen for WooCommerce checkout updates
+        $(document.body).on('updated_checkout', function() {
+            // Check if PayPal is selected after checkout update
+            if ($('input[name="payment_method"]:checked').val() === 'paypal_proxy') {
+                $('#place_order').hide();
+            }
+        });
     }
     
     /**

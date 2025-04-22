@@ -96,6 +96,9 @@ function wpppc_enqueue_scripts() {
 /**
  * AJAX handler for validating checkout fields
  */
+/**
+ * AJAX handler for validating checkout fields
+ */
 function wpppc_validate_checkout_fields() {
     check_ajax_referer('wpppc-nonce', 'nonce');
     
@@ -104,9 +107,26 @@ function wpppc_validate_checkout_fields() {
     // Get checkout fields
     $fields = WC()->checkout()->get_checkout_fields();
     
-    // Loop through required fields and check if they're empty
+    // Check if shipping to different address
+    $ship_to_different_address = !empty($_POST['ship_to_different_address']);
+    
+    // Check if creating account
+    $create_account = !empty($_POST['createaccount']);
+    
+    // Loop through field groups and validate conditionally
     foreach ($fields as $fieldset_key => $fieldset) {
+        // Skip shipping fields if not shipping to different address
+        if ($fieldset_key === 'shipping' && !$ship_to_different_address) {
+            continue;
+        }
+        
+        // Skip account fields if not creating account
+        if ($fieldset_key === 'account' && !$create_account) {
+            continue;
+        }
+        
         foreach ($fieldset as $key => $field) {
+            // Only validate required fields that are empty
             if (!empty($field['required']) && empty($_POST[$key])) {
                 $errors[$key] = sprintf(__('%s is a required field.', 'woocommerce'), $field['label']);
             }

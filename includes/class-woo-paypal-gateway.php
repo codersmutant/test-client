@@ -23,7 +23,7 @@ class WPPPC_PayPal_Gateway extends WC_Payment_Gateway {
      */
     public function __construct() {
         $this->id                 = 'paypal_proxy';
-        $this->icon               = apply_filters('woocommerce_paypal_proxy_icon', WPPPC_PLUGIN_URL . 'assets/images/paypal.png');
+        $this->icon               = apply_filters('woocommerce_paypal_proxy_icon', WPPPC_PLUGIN_URL . 'assets/images/paypal.svg');
         $this->has_fields         = true;
         $this->method_title       = __('PayPal via Proxy', 'woo-paypal-proxy-client');
         $this->method_description = __('Accept PayPal payments securely through Website B proxy.', 'woo-paypal-proxy-client');
@@ -37,7 +37,9 @@ class WPPPC_PayPal_Gateway extends WC_Payment_Gateway {
         $this->description  = $this->get_option('description');
         $this->enabled      = $this->get_option('enabled');
         $this->proxy_url    = $this->get_option('proxy_url');
-        $this->api_key      = $this->get_option('api_key');
+        //$this->api_key      = $this->get_option('wpppc_api_key');
+        $this->api_key = get_option('wpppc_api_key');
+
         
         // Initialize API handler
         $this->api_handler = new WPPPC_API_Handler(
@@ -142,11 +144,13 @@ class WPPPC_PayPal_Gateway extends WC_Payment_Gateway {
             'site_url'      => base64_encode(get_site_url()),
         );
         
+        
+
+
         $iframe_url = $this->proxy_url . '?' . http_build_query($params);
         
-        error_log('PayPal Proxy Client Debug - Using API key: ' . $this->api_key);
-        error_log('PayPal Proxy Client Debug - Setting from DB: ' . get_option('wpppc_api_key'));
-        $this->api_key = get_option('wpppc_api_key');
+        
+
 
         
         return $iframe_url;
@@ -200,8 +204,72 @@ public function ajax_create_order() {
                 'email'      => !empty($_POST['billing_email']) ? sanitize_email($_POST['billing_email']) : 'test@example.com',
             );
             
-            $order->set_address($billing_address, 'billing');
-            $order->set_address($billing_address, 'shipping');
+           
+
+// Get and set complete billing address with all fields
+$complete_billing = array(
+    'first_name' => !empty($_POST['billing_first_name']) ? sanitize_text_field($_POST['billing_first_name']) : 'Test',
+    'last_name'  => !empty($_POST['billing_last_name']) ? sanitize_text_field($_POST['billing_last_name']) : 'User',
+    'email'      => !empty($_POST['billing_email']) ? sanitize_email($_POST['billing_email']) : 'test@example.com',
+    'phone'      => !empty($_POST['billing_phone']) ? sanitize_text_field($_POST['billing_phone']) : '',
+    'address_1'  => !empty($_POST['billing_address_1']) ? sanitize_text_field($_POST['billing_address_1']) : '',
+    'address_2'  => !empty($_POST['billing_address_2']) ? sanitize_text_field($_POST['billing_address_2']) : '',
+    'city'       => !empty($_POST['billing_city']) ? sanitize_text_field($_POST['billing_city']) : '',
+    'state'      => !empty($_POST['billing_state']) ? sanitize_text_field($_POST['billing_state']) : '',
+    'postcode'   => !empty($_POST['billing_postcode']) ? sanitize_text_field($_POST['billing_postcode']) : '',
+    'country'    => !empty($_POST['billing_country']) ? sanitize_text_field($_POST['billing_country']) : '',
+);
+
+$order->set_address($complete_billing, 'billing');
+
+// Check if shipping to different address
+$ship_to_different_address = !empty($_POST['ship_to_different_address']);
+
+if ($ship_to_different_address) {
+    // Use shipping address fields
+    $complete_shipping = array(
+        'first_name' => !empty($_POST['shipping_first_name']) ? sanitize_text_field($_POST['shipping_first_name']) : $complete_billing['first_name'],
+        'last_name'  => !empty($_POST['shipping_last_name']) ? sanitize_text_field($_POST['shipping_last_name']) : $complete_billing['last_name'],
+        'address_1'  => !empty($_POST['shipping_address_1']) ? sanitize_text_field($_POST['shipping_address_1']) : $complete_billing['address_1'],
+        'address_2'  => !empty($_POST['shipping_address_2']) ? sanitize_text_field($_POST['shipping_address_2']) : $complete_billing['address_2'],
+        'city'       => !empty($_POST['shipping_city']) ? sanitize_text_field($_POST['shipping_city']) : $complete_billing['city'],
+        'state'      => !empty($_POST['shipping_state']) ? sanitize_text_field($_POST['shipping_state']) : $complete_billing['state'],
+        'postcode'   => !empty($_POST['shipping_postcode']) ? sanitize_text_field($_POST['shipping_postcode']) : $complete_billing['postcode'],
+        'country'    => !empty($_POST['shipping_country']) ? sanitize_text_field($_POST['shipping_country']) : $complete_billing['country'],
+    );
+} else {
+    // Copy from billing address
+    $complete_shipping = $complete_billing;
+}
+
+$order->set_address($complete_shipping, 'shipping');
+
+// Add shipping method from cart
+$chosen_shipping_methods = WC()->session->get('chosen_shipping_methods');
+if (!empty($chosen_shipping_methods)) {
+    // Get active shipping methods
+    $shipping_methods = WC()->shipping->get_shipping_methods();
+    
+    // Add shipping line items
+    foreach (WC()->shipping->get_packages() as $package_key => $package) {
+        if (isset($chosen_shipping_methods[$package_key], $package['rates'][$chosen_shipping_methods[$package_key]])) {
+            $shipping_rate = $package['rates'][$chosen_shipping_methods[$package_key]];
+            $item = new WC_Order_Item_Shipping();
+            $item->set_props(array(
+                'method_title' => $shipping_rate->get_label(),
+                'method_id'    => $shipping_rate->get_id(),
+                'total'        => wc_format_decimal($shipping_rate->get_cost()),
+                'taxes'        => $shipping_rate->get_taxes(),
+            ));
+            
+            foreach ($shipping_rate->get_meta_data() as $key => $value) {
+                $item->add_meta_data($key, $value, true);
+            }
+            
+            $order->add_item($item);
+        }
+    }
+}
             
             // Add a product if cart is empty (for testing)
             if (WC()->cart->is_empty()) {
@@ -378,28 +446,45 @@ public function ajax_create_order() {
         }
     }
     
-    /**
-     * Validate checkout fields
-     */
-    private function validate_checkout_fields() {
-        $errors = array();
+   /**
+ * Validate checkout fields
+ */
+private function validate_checkout_fields() {
+    $errors = array();
+    
+    // Get checkout fields
+    $fields = WC()->checkout()->get_checkout_fields();
+    
+    // Check if shipping to different address
+    $ship_to_different_address = !empty($_POST['ship_to_different_address']);
+    
+    // Check if creating account
+    $create_account = !empty($_POST['createaccount']);
+    
+    // Loop through field groups and validate conditionally
+    foreach ($fields as $fieldset_key => $fieldset) {
+        // Skip shipping fields if not shipping to different address
+        if ($fieldset_key === 'shipping' && !$ship_to_different_address) {
+            continue;
+        }
         
-        // Get checkout fields
-        $fields = WC()->checkout()->get_checkout_fields();
+        // Skip account fields if not creating account
+        if ($fieldset_key === 'account' && !$create_account) {
+            continue;
+        }
         
-        // Loop through required fields and check if they're empty
-        foreach ($fields as $fieldset_key => $fieldset) {
-            foreach ($fieldset as $key => $field) {
-                if (!empty($field['required']) && empty($_POST[$key])) {
-                    $errors[$key] = sprintf(__('%s is a required field.', 'woocommerce'), $field['label']);
-                }
+        foreach ($fieldset as $key => $field) {
+            // Only validate required fields that are empty
+            if (!empty($field['required']) && empty($_POST[$key])) {
+                $errors[$key] = sprintf(__('%s is a required field.', 'woocommerce'), $field['label']);
             }
         }
-        
-        if (empty($errors)) {
-            return array('valid' => true);
-        } else {
-            return array('valid' => false, 'errors' => $errors);
-        }
+    }
+    
+    if (empty($errors)) {
+        return array('valid' => true);
+    } else {
+        return array('valid' => false, 'errors' => $errors);
+    }
     }
 }
