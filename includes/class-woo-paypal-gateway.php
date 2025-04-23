@@ -54,8 +54,8 @@ class WPPPC_PayPal_Gateway extends WC_Payment_Gateway {
         add_action('woocommerce_api_wpppc_callback', array($this, 'process_callback'));
         
         // AJAX handlers for order processing
-        add_action('wp_ajax_wpppc_create_order', array($this, 'ajax_create_order'));
-        add_action('wp_ajax_nopriv_wpppc_create_order', array($this, 'ajax_create_order'));
+        add_action('wp_ajax_wpppc_create_order', array($this, 'ajax_create_order', 5));
+        add_action('wp_ajax_nopriv_wpppc_create_order', array($this, 'ajax_create_order', 5));
         add_action('wp_ajax_wpppc_complete_order', array($this, 'ajax_complete_order'));
         add_action('wp_ajax_nopriv_wpppc_complete_order', array($this, 'ajax_complete_order'));
     }
@@ -352,6 +352,37 @@ if (!empty($chosen_shipping_methods)) {
     }
     
     $order = wc_get_order($order_id);
+    
+    // IMPORTANT: Check if shipping is missing but should be there
+    if ($order->get_shipping_total() <= 0 && WC()->session && WC()->session->get('chosen_shipping_methods')) {
+        // Retrieve the shipping methods from session
+        $chosen_shipping_methods = WC()->session->get('chosen_shipping_methods');
+        
+        // Re-add shipping methods to the order
+        foreach (WC()->shipping->get_packages() as $package_key => $package) {
+            if (isset($chosen_shipping_methods[$package_key], $package['rates'][$chosen_shipping_methods[$package_key]])) {
+                $shipping_rate = $package['rates'][$chosen_shipping_methods[$package_key]];
+                
+                // Create shipping line item
+                $item = new WC_Order_Item_Shipping();
+                $item->set_props(array(
+                    'method_title' => $shipping_rate->get_label(),
+                    'method_id'    => $shipping_rate->get_id(),
+                    'total'        => wc_format_decimal($shipping_rate->get_cost()),
+                    'taxes'        => $shipping_rate->get_taxes(),
+                ));
+                
+                foreach ($shipping_rate->get_meta_data() as $key => $value) {
+                    $item->add_meta_data($key, $value, true);
+                }
+                
+                $order->add_item($item);
+            }
+        }
+        
+        // Recalculate totals with shipping
+        $order->calculate_totals();
+    }
     
     if (!$order) {
         error_log('PayPal Proxy - Order not found: ' . $order_id);

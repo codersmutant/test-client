@@ -201,8 +201,71 @@ function wpppc_create_order_handler() {
             'country'    => isset($_POST['billing_country']) ? sanitize_text_field($_POST['billing_country']) : 'US',
         );
         
-        $order->set_address($address, 'billing');
-        $order->set_address($address, 'shipping');
+        // Get and set complete billing address with all fields
+$complete_billing = array(
+    'first_name' => !empty($_POST['billing_first_name']) ? sanitize_text_field($_POST['billing_first_name']) : 'Test',
+    'last_name'  => !empty($_POST['billing_last_name']) ? sanitize_text_field($_POST['billing_last_name']) : 'User',
+    'email'      => !empty($_POST['billing_email']) ? sanitize_email($_POST['billing_email']) : 'test@example.com',
+    'phone'      => !empty($_POST['billing_phone']) ? sanitize_text_field($_POST['billing_phone']) : '',
+    'address_1'  => !empty($_POST['billing_address_1']) ? sanitize_text_field($_POST['billing_address_1']) : '',
+    'address_2'  => !empty($_POST['billing_address_2']) ? sanitize_text_field($_POST['billing_address_2']) : '',
+    'city'       => !empty($_POST['billing_city']) ? sanitize_text_field($_POST['billing_city']) : '',
+    'state'      => !empty($_POST['billing_state']) ? sanitize_text_field($_POST['billing_state']) : '',
+    'postcode'   => !empty($_POST['billing_postcode']) ? sanitize_text_field($_POST['billing_postcode']) : '',
+    'country'    => !empty($_POST['billing_country']) ? sanitize_text_field($_POST['billing_country']) : '',
+);
+
+$order->set_address($complete_billing, 'billing');
+
+// Check if shipping to different address
+$ship_to_different_address = !empty($_POST['ship_to_different_address']);
+
+if ($ship_to_different_address) {
+    // Use shipping address fields
+    $complete_shipping = array(
+        'first_name' => !empty($_POST['shipping_first_name']) ? sanitize_text_field($_POST['shipping_first_name']) : $complete_billing['first_name'],
+        'last_name'  => !empty($_POST['shipping_last_name']) ? sanitize_text_field($_POST['shipping_last_name']) : $complete_billing['last_name'],
+        'address_1'  => !empty($_POST['shipping_address_1']) ? sanitize_text_field($_POST['shipping_address_1']) : $complete_billing['address_1'],
+        'address_2'  => !empty($_POST['shipping_address_2']) ? sanitize_text_field($_POST['shipping_address_2']) : $complete_billing['address_2'],
+        'city'       => !empty($_POST['shipping_city']) ? sanitize_text_field($_POST['shipping_city']) : $complete_billing['city'],
+        'state'      => !empty($_POST['shipping_state']) ? sanitize_text_field($_POST['shipping_state']) : $complete_billing['state'],
+        'postcode'   => !empty($_POST['shipping_postcode']) ? sanitize_text_field($_POST['shipping_postcode']) : $complete_billing['postcode'],
+        'country'    => !empty($_POST['shipping_country']) ? sanitize_text_field($_POST['shipping_country']) : $complete_billing['country'],
+    );
+} else {
+    // Copy from billing address
+    $complete_shipping = $complete_billing;
+}
+
+$order->set_address($complete_shipping, 'shipping');
+
+// Add shipping method from cart
+$chosen_shipping_methods = WC()->session->get('chosen_shipping_methods');
+if (!empty($chosen_shipping_methods)) {
+    // Get active shipping methods
+    $shipping_methods = WC()->shipping->get_shipping_methods();
+    
+    // Add shipping line items
+    foreach (WC()->shipping->get_packages() as $package_key => $package) {
+        if (isset($chosen_shipping_methods[$package_key], $package['rates'][$chosen_shipping_methods[$package_key]])) {
+            $shipping_rate = $package['rates'][$chosen_shipping_methods[$package_key]];
+            $item = new WC_Order_Item_Shipping();
+            $item->set_props(array(
+                'method_title' => $shipping_rate->get_label(),
+                'method_id'    => $shipping_rate->get_id(),
+                'total'        => wc_format_decimal($shipping_rate->get_cost()),
+                'taxes'        => $shipping_rate->get_taxes(),
+            ));
+            
+            foreach ($shipping_rate->get_meta_data() as $key => $value) {
+                $item->add_meta_data($key, $value, true);
+            }
+            
+            $order->add_item($item);
+        }
+    }
+}
+   
         
         // Add cart items (simplified for testing)
         if (WC()->cart->is_empty()) {
@@ -250,8 +313,8 @@ function wpppc_create_order_handler() {
     wp_die();
 }
 
-add_action('wp_ajax_wpppc_create_order', 'wpppc_create_order_handler');
-add_action('wp_ajax_nopriv_wpppc_create_order', 'wpppc_create_order_handler');
+add_action('wp_ajax_wpppc_create_order', 'wpppc_create_order_handler', 10);
+add_action('wp_ajax_nopriv_wpppc_create_order', 'wpppc_create_order_handler', 10);
 
 
 /**
@@ -283,6 +346,37 @@ function wpppc_complete_order_handler() {
     }
     
     $order = wc_get_order($order_id);
+    
+    // IMPORTANT: Check if shipping is missing but should be there
+    if ($order->get_shipping_total() <= 0 && WC()->session && WC()->session->get('chosen_shipping_methods')) {
+        // Retrieve the shipping methods from session
+        $chosen_shipping_methods = WC()->session->get('chosen_shipping_methods');
+        
+        // Re-add shipping methods to the order
+        foreach (WC()->shipping->get_packages() as $package_key => $package) {
+            if (isset($chosen_shipping_methods[$package_key], $package['rates'][$chosen_shipping_methods[$package_key]])) {
+                $shipping_rate = $package['rates'][$chosen_shipping_methods[$package_key]];
+                
+                // Create shipping line item
+                $item = new WC_Order_Item_Shipping();
+                $item->set_props(array(
+                    'method_title' => $shipping_rate->get_label(),
+                    'method_id'    => $shipping_rate->get_id(),
+                    'total'        => wc_format_decimal($shipping_rate->get_cost()),
+                    'taxes'        => $shipping_rate->get_taxes(),
+                ));
+                
+                foreach ($shipping_rate->get_meta_data() as $key => $value) {
+                    $item->add_meta_data($key, $value, true);
+                }
+                
+                $order->add_item($item);
+            }
+        }
+        
+        // Recalculate totals with shipping
+        $order->calculate_totals();
+    }
     
     if (!$order) {
         error_log('PayPal Proxy Client - Order not found: ' . $order_id);
